@@ -22,6 +22,7 @@ const config = {
 
   // Server
   port: process.env.PORT || 3000,
+  baseUrl: process.env.APP_BASE_URL || 'https://slip-bot-uown.onrender.com',
 };
 
 // ─── Validate required config ───────────────────────────

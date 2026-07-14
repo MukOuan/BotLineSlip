@@ -1,3 +1,4 @@
+const { config } = require('../config');
 const { parseExpenseMessage } = require('../services/geminiService');
 const { appendTransaction, getAllTransactions, getTransactions } = require('../services/transactionService');
 const {
@@ -6,6 +7,8 @@ const {
   generateFlexSummary,
   generateMissingFieldReply,
   generateTransactionFlex,
+  generateTransactionsLinkFlex,
+  isAllTransactionsRequest,
   isAnalysisRequest,
   isBalanceRequest,
   isGreeting,
@@ -32,6 +35,10 @@ async function handleTextMessage(userId, userMessage) {
 
   if (isBalanceRequest(userMessage)) {
     return buildBalanceReply(userId);
+  }
+
+  if (isAllTransactionsRequest(userMessage)) {
+    return buildAllTransactionsReply(userId);
   }
 
   if (isAnalysisRequest(userMessage)) {
@@ -114,6 +121,13 @@ async function buildBalanceReply(userId) {
     console.error('❌ Balance error:', error);
     return GENERAL_RESPONSES.error;
   }
+}
+
+async function buildAllTransactionsReply(userId) {
+  if (!userId) return GENERAL_RESPONSES.error;
+
+  const url = `${config.baseUrl}/transactions/${userId}`;
+  return generateTransactionsLinkFlex(url);
 }
 
 async function saveAndBuildReply(transactionData, userId) {
