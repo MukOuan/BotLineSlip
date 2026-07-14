@@ -3,7 +3,7 @@
  * เชื่อมต่อ อ่าน และเขียนข้อมูลธุรกรรมลง Supabase (PostgreSQL)
  */
 const { createClient } = require('@supabase/supabase-js');
-const { config } = require('../config');
+const { config } = require('../../config');
 
 const supabase = createClient(config.supabase.url, config.supabase.anonKey);
 const TABLE = config.supabase.table;
@@ -67,6 +67,31 @@ async function getTransactions(lineUserId, dateFrom, dateTo) {
   }
 }
 
+async function getAllTransactions(lineUserId) {
+  try {
+    let query = supabase
+      .from(TABLE)
+      .select('item, amount, category, type, date')
+      .order('date', { ascending: true });
+
+    if (lineUserId) {
+      query = query.eq('line_user_id', lineUserId);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('❌ Supabase Select Error:', error.message);
+      return null;
+    }
+
+    return data;
+  } catch (error) {
+    console.error('❌ Supabase Error:', error.message);
+    return null;
+  }
+}
+
 async function testConnection() {
   try {
     const { error } = await supabase.from(TABLE).select('id').limit(1);
@@ -84,6 +109,7 @@ async function testConnection() {
 
 module.exports = {
   appendTransaction,
+  getAllTransactions,
   getTransactions,
   supabase,
   testConnection,
