@@ -2,24 +2,21 @@
  * Gemini AI Service
  * วิเคราะห์ข้อความภาษาไทย → structured JSON
  */
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { GoogleGenAI } = require('@google/genai');
 const { config } = require('../config');
-const { buildSystemPrompt, buildUserPrompt } = require('../constants/prompts');
+const { buildSystemPrompt, buildUserPrompt, buildSlipPrompt } = require('../constants/prompts');
 const { getToday, getYesterday, isValidDate, parseDateFromText } = require('../utils/dateParser');
 const { ALL_CATEGORIES, categorizeByKeyword, classifyByKeyword } = require('../constants/categories');
 const { boostConfidenceForObviousTransaction, isAmbiguousTransactionText } = require('../utils/transactionRules');
 const { cleanTransactionItem, extractAmount, parseAmountValue } = require('../utils/moneyParser');
 
 // ─── Initialize Gemini ─────────────────────────────────
-const genAI = new GoogleGenerativeAI(config.gemini.apiKey);
+const ai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
 
-const model = genAI.getGenerativeModel({
-  model: config.gemini.model,
-  generationConfig: {
-    responseMimeType: 'application/json',
-    temperature: 0.15, // ยัง deterministic แต่ยืดหยุ่นขึ้นเล็กน้อยกับภาษาไทยธรรมชาติ
-  },
-});
+const GENERATION_CONFIG = {
+  responseMimeType: 'application/json',
+  temperature: 0.15, // ยัง deterministic แต่ยืดหยุ่นขึ้นเล็กน้อยกับภาษาไทยธรรมชาติ
+};
 
 /**
  * ส่งข้อความให้ Gemini AI วิเคราะห์
@@ -34,13 +31,15 @@ async function parseExpenseMessage(userMessage) {
     const systemPrompt = buildSystemPrompt(today, yesterday);
     const userPrompt = buildUserPrompt(userMessage);
 
-    const result = await model.generateContent({
+    const result = await ai.models.generateContent({
+      model: config.gemini.model,
       contents: [
         { role: 'user', parts: [{ text: systemPrompt + '\n\n' + userPrompt }] },
       ],
+      config: GENERATION_CONFIG,
     });
 
-    const responseText = result.response.text();
+    const responseText = result.text;
     const parsed = JSON.parse(responseText);
 
     // ─── Validate & Sanitize ──────────────────────────
@@ -139,6 +138,65 @@ function sanitizeResult(parsed, originalText) {
 }
 
 /**
+ * ส่งรูปสลิปให้ Gemini Vision อ่าน
+ * @param {string} base64Image - รูปภาพแบบ base64 (ไม่มี prefix data:image/...)
+ * @param {string} mimeType - เช่น 'image/jpeg'
+ * @returns {object|null} { amount, date, type, note, confidence } หรือ null ถ้าอ่านล้มเหลว
+ */
+async function parseSlipImage(base64Image, mimeType = 'image/jpeg') {
+  try {
+    const slipPrompt = buildSlipPrompt();
+
+    const result = await ai.models.generateContent({
+      model: config.gemini.model,
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            { text: slipPrompt },
+            { inlineData: { mimeType, data: base64Image } },
+          ],
+        },
+      ],
+      config: GENERATION_CONFIG,
+    });
+
+    const responseText = result.text;
+    const parsed = JSON.parse(responseText);
+
+    return sanitizeSlipResult(parsed);
+  } catch (error) {
+    console.error('❌ Gemini Slip Vision Error:', error.message);
+    return null;
+  }
+}
+
+/**
+ * Validate ผลลัพธ์การอ่านสลิปจาก Gemini
+ */
+function sanitizeSlipResult(parsed) {
+  const today = getToday();
+
+  const amount = parsed.amount !== null && parsed.amount !== undefined
+    ? parseAmountValue(parsed.amount)
+    : null;
+
+  const type = ['รายรับ', 'รายจ่าย'].includes(parsed.type) ? parsed.type : 'รายจ่าย';
+  const date = parsed.date && isValidDate(parsed.date) ? parsed.date : today;
+
+  const rawNote = parsed.note;
+  const note = rawNote && String(rawNote).trim() !== '' && String(rawNote).trim().toLowerCase() !== 'null'
+    ? String(rawNote).trim()
+    : null;
+
+  const confidence = typeof parsed.confidence === 'number' && parsed.confidence >= 0 && parsed.confidence <= 1
+    ? parsed.confidence
+    : 0.7;
+
+  return { amount, date, type, note, confidence };
+}
+
+/**
  * Fallback parser เมื่อ Gemini ล้มเหลว
  * พยายาม extract จำนวนเงินและ classify ด้วย keyword
  */
@@ -174,4 +232,4 @@ function fallbackParse(text) {
   };
 }
 
-module.exports = { parseExpenseMessage };
+module.exports = { parseExpenseMessage, parseSlipImage };
